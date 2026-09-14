@@ -32,9 +32,17 @@ PEM_MARKER = re.compile(
 SSH_PUBKEY = re.compile(rb"ssh-(?:rsa|ed25519|dss)\s+AAAA[0-9A-Za-z+/=]{20,}")
 AWS_ACCESS_KEY = re.compile(rb"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
 AWS_SECRET_KEY = re.compile(rb"(?i)aws_secret_access_key\s*[=:]\s*[\"']?([0-9A-Za-z/+]{40})")
+# Require the value to be QUOTED and to look like an actual secret (mixed
+# alphanumeric, length >= 8). This stops the v0.1 flood of matches on source
+# code, minified JS, and prose containing the words password/token/secret.
 GENERIC_API_KEY = re.compile(
-    rb"(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b\s*[=:]\s*[\"']?([^\s\"'#;]{6,120})"
+    rb"(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b\s*[=:]\s*"
+    rb"[\"']([A-Za-z0-9][A-Za-z0-9._\-/+]{7,120})[\"']"
 )
+
+# Template/placeholder markers seen in real firmware config (e.g. ddns/services
+# uses [PASSWORD] as a substitution token, not a secret).
+TEMPLATE_VALUE = re.compile(rb"^[\[<{$]|[\]>}]$|^%[sd]|^\$\{")
 PRIVATE_KEY_BLOCK = re.compile(
     rb"-----BEGIN[ A-Z]*PRIVATE KEY-----(.*?)-----END[ A-Z]*PRIVATE KEY-----",
     re.DOTALL,
@@ -74,8 +82,29 @@ def _looks_like_real_private_key(block_bytes: bytes) -> tuple[bool, str]:
 
 
 def _is_placeholder(value: bytes) -> bool:
-    v = value.strip().strip(b"\"'").lower()
-    return v in KNOWN_PLACEHOLDERS or v.startswith(b"your_")
+    v = value.strip().strip(b"\"'")
+    if TEMPLATE_VALUE.search(v):
+        return True
+    vl = v.lower()
+    return vl in KNOWN_PLACEHOLDERS or vl.startswith(b"your_")
+
+
+# Generic-credential matching is skipped on these: compiled binaries and
+# minified/library assets produce almost only false positives there. The
+# high-signal checks (private keys, SSH authorized_keys, AWS) still run on all.
+_GENERIC_SKIP_EXT = {".so", ".min.js", ".swp"}
+_GENERIC_SKIP_SUBSTR = (b"\x7fELF",)  # ELF magic -> it's a binary
+
+
+def _skip_generic(data: bytes, path: Path) -> bool:
+    name = path.name.lower()
+    if name.endswith(".min.js") or path.suffix.lower() in {".so", ".swp"}:
+        return True
+    if path.suffix == "" and data[:4] == b"\x7fELF":
+        return True  # ELF binary with no extension
+    if data[:4] == b"\x7fELF":
+        return True
+    return False
 
 
 def scan_bytes(data: bytes, path: Path) -> list[Finding]:
@@ -197,10 +226,15 @@ def scan_bytes(data: bytes, path: Path) -> list[Finding]:
         )
 
     # --- generic key=value credentials (with placeholder guard) -----------------
+    skip_generic = _skip_generic(data, path)
     for pat, sid, title in (
         (AWS_SECRET_KEY, "SECRET-AWS-SECRET", "AWS secret access key"),
         (GENERIC_API_KEY, "SECRET-GENERIC", "Generic credential assignment"),
     ):
+        # AWS secret key is high-signal and always runs; generic is noisy on
+        # binaries/minified assets, so skip it there.
+        if sid == "SECRET-GENERIC" and skip_generic:
+            continue
         for m in pat.finditer(data):
             value = m.group(1) if m.groups() else m.group(0)
             if _is_placeholder(value):

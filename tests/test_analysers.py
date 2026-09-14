@@ -76,3 +76,23 @@ def test_empty_password_is_low_confidence(tmp_path: Path):
     findings = accounts.scan_rootfs(root)
     empty = [f for f in findings if f.id == "ACCT-EMPTY-PW"]
     assert empty and empty[0].confidence == "low"
+
+
+def test_generic_credential_noise_suppressed(tmp_path):
+    """v0.1 flooded on code/binaries/templates. Lock in the tighter matching."""
+    from fw_scout import secrets
+    noise = [
+        (b"if (password == x) return;", tmp_path / "app.js"),
+        (b"PASSWORD=[PASSWORD]", tmp_path / "services"),
+        (b"token: function(){}", tmp_path / "jquery.min.js"),
+        (b"\x7fELFpassword=stuff", tmp_path / "busybox"),
+    ]
+    for data, p in noise:
+        found = secrets.scan_bytes(data, p)
+        assert not [f for f in found if f.id == "SECRET-GENERIC"]
+
+
+def test_real_quoted_credential_still_detected(tmp_path):
+    from fw_scout import secrets
+    found = secrets.scan_bytes(b'api_key = "aB3xK9mQ7pL2vN8wR4tY"', tmp_path / "c.conf")
+    assert any(f.id == "SECRET-GENERIC" for f in found)
