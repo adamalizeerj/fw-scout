@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fw-scout"
+version = "0.1.0"
+description = "Firmware hidden-region and backdoor scanner: entropy analysis, secret detection, backdoor-account hunting, and YARA over extracted firmware."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Tony" }]
+keywords = ["firmware", "security", "reverse-engineering", "entropy", "iot", "binwalk", "yara"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+]
+
+# Core analysis runs on the standard library alone. YARA is optional; the
+# scanner degrades gracefully when it is absent.
+dependencies = []
+
+[project.optional-dependencies]
+yara = ["yara-python>=4.3"]
+dev = ["pytest>=7", "pycryptodome>=3.19", "ruff>=0.5"]
+
+[project.scripts]
+fw-scout = "fw_scout.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/YOURUSER/fw-scout"
+Issues = "https://github.com/YOURUSER/fw-scout/issues"
+
+[tool.setuptools]
+packages = ["fw_scout", "fw_scout.reporters"]
+
+[tool.setuptools.package-data]
+fw_scout = ["rules/*.yar"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["tools", "extracted", "targets", "ghidra-work", ".venv"]
