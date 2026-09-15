@@ -80,7 +80,7 @@ rule aws_access_key_id
 rule unauth_currentsetting_endpoint
 {
     meta:
-        description = "NETGEAR-style unauthenticated currentsetting info endpoint"
+        description = "Unauthenticated router info-disclosure endpoint (currentsetting-style)"
         severity = "low"
         weakness = "CWE-200"
         detail = "An unauthenticated device-info endpoint leaks firmware version/model/region, aiding targeted attacks."
